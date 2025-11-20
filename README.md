@@ -70,6 +70,133 @@ Edit `config/fuzz_targets.yaml` to toggle or add fuzzers. Supported fields:
 Artifacts live under `artifacts/<name>/` and include `build.log` and `run.log`
 for quick triage.
 
+## Sample Target Catalog
+
+The repository ships with a handful of pre-wired targets that demonstrate common
+bug classes and sanitizer configurations:
+
+- **`libpng_decoder`** – baseline image parser with `address` sanitizer and a
+  tuned dictionary for file-format tokens.
+- **`libxslt_xpath`** – XML + XPath stress test that benefits from deeper stack
+  traces and custom ASAN options.
+- **`ffmpeg_mov_demuxer`** – media demuxer hammered under `memory` sanitizer
+  with oversized buffers to stress vectorized codecs.
+- **`wolfssl_dtls`** – network-style harness that keeps `undefined` sanitizer
+  enabled to flush UB in cryptographic state machines.
+- **`sqlite_shell`** – disabled by default, but demonstrates how to park targets
+  in the config until you are ready to enable them.
+- **`zlib_stream`** – compression/decompression fuzzing with strict ASAN settings
+  to flag stack reuse bugs in the inflate logic.
+- **`curl_url_parser`** – exercises libcurl’s URL parser under `undefined`
+  sanitizer to surface protocol smuggling edge cases.
+- **`nghttp2_hpack`** – HPACK decoder harness running under MSAN to reveal
+  initialization mistakes inside HTTP/2 header compression.
+- **`harfbuzz_shaper`** – glyph shaping fuzzer that constrains buffer length and
+  favors coverage across complex scripts.
+- **`imagemagick_svg`** – SVG importer fuzzing with tuned ASAN options to catch
+  parser-side heap corruption in graphics pipelines.
+
+Enable or tweak any of these entries, then re-run deploy or call the
+orchestrator directly inside the runner container to pick up the changes.
+
+## Example Commands
+
+These snippets cover the most common day-to-day actions:
+
+```bash
+# Spin up everything, installing Docker/Git if missing
+python3 scripts/deploy.py deploy --auto-install
+
+# Force a clean oss-fuzz checkout and rebuild images from scratch
+python3 scripts/deploy.py deploy --force-reclone
+
+# Tail the libpng fuzzer log as it runs
+docker compose exec oss-fuzz-runner tail -f /workspace/artifacts/libpng_decoder/run.log
+
+# Run orchestrator manually with debug logs and limited parallelism
+docker compose exec oss-fuzz-runner python3 /workspace/scripts/fuzz_orchestrator.py \
+  --log-level DEBUG --max-parallel 2
+
+# Reproduce a crash inside the builder container
+docker compose run --rm oss-fuzz-builder \
+  bash -lc "./infra/helper.py reproduce libpng libpng_read_fuzzer artifacts/libpng_decoder/crashes/id:000000"
+```
+
+## Hands-on Tutorial: Hunting an RCE in libpng
+
+The workflow below mirrors how you could discover and triage a critical bug (for
+example, an RCE primitive) in a memory-unsafe parser such as `libpng`. Adjust
+project names or sanitizers to match your real target.
+
+1. **Deploy the fuzzing stack**
+   ```bash
+   python3 scripts/deploy.py deploy --auto-install
+   ```
+   This bootstraps dependencies, clones `oss-fuzz`, builds the containers, and
+   launches the builder/runner pair.
+
+2. **Review and customize the target entry**  
+   Open `config/fuzz_targets.yaml` and inspect `libpng_decoder`. Tune
+   `environment`, `dictionary`, or `max_run_seconds` to guide the search (e.g.,
+   set `UBSAN_OPTIONS=print_stacktrace=1:silence_unsigned_overflow=0`).
+
+3. **Kick off a focused fuzzing session**  
+   Inside the runner container, call the orchestrator for a single target:
+   ```bash
+   docker compose exec oss-fuzz-runner python3 /workspace/scripts/fuzz_orchestrator.py \
+     --config /workspace/config/fuzz_targets.yaml --max-parallel 1
+   ```
+   The script builds `libpng`, runs the harness, and streams logs to
+   `artifacts/libpng_decoder/run.log`.
+
+4. **Monitor coverage and crashes in real time**
+   ```bash
+   tail -f artifacts/libpng_decoder/run.log
+   ```
+   Look for sanitizer violations such as `heap-buffer-overflow` or
+   `stack-use-after-return`. Crash artifacts land in
+   `artifacts/libpng_decoder/crashes/`.
+
+5. **Reproduce the crash with helper.py**  
+   Use the upstream helper to verify determinism and gather stack traces:
+   ```bash
+   docker compose run --rm oss-fuzz-builder \
+     bash -lc "./infra/helper.py reproduce libpng libpng_read_fuzzer \
+     artifacts/libpng_decoder/crashes/id:000000"
+   ```
+   Attach `gdb` or `lldb` inside the container if you need richer debugging.
+
+6. **Minimize the input and isolate the bug class**
+   ```bash
+   docker compose run --rm oss-fuzz-builder \
+     bash -lc "./infra/helper.py minimize_corpus libpng libpng_read_fuzzer \
+     --crash artifacts/libpng_decoder/crashes/id:000000 \
+     --corpus artifacts/libpng_decoder/corpus"
+   ```
+   Smaller proofs-of-concept make it easier to reason about parser logic and to
+   craft payloads for downstream exploit scenarios.
+
+7. **Evaluate exploitability for RCE**  
+   Translate the memory bug into a remote trigger. For an image decoder, that
+   often means embedding the crashing chunk into a file type that a client or
+   server will automatically parse. Pair the minimized input with a harness that
+   mirrors the real product (e.g., a web server thumbnailer) to confirm control
+   over instruction pointer or heap metadata.
+
+8. **Patch, harden, and rerun**  
+   Apply candidate fixes inside `oss-fuzz/projects/libpng`, rebuild with
+   `docker compose run --rm oss-fuzz-builder bash -lc "./infra/helper.py build_fuzzers libpng"`,
+   then rerun step 3 to ensure the issue is resolved.
+
+9. **Report responsibly**  
+   Follow the target project's disclosure policy, coordinate CVE assignment if
+   the bug yields RCE, and contribute the minimized corpus file back to improve
+   regression coverage.
+
+The same loop works for the other sample targets (e.g., `wolfssl_dtls` for
+network-facing cryptographic code or `ffmpeg_mov_demuxer` for media pipelines);
+only the harness names and reproduction arguments change.
+
 ## Rollback & Cleanup
 
 Run `python3 scripts/deploy.py rollback` to:
