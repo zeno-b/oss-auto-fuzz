@@ -1,0 +1,49 @@
+version: "3.9"
+
+x-common-env: &common-env
+  OSS_FUZZ_DIR: /workspace/oss-fuzz
+  FUZZ_TARGETS_FILE: /workspace/config/fuzz_targets.yaml
+  ARTIFACTS_DIR: /workspace/artifacts
+
+services:
+  oss_fuzz_builder:
+    build:
+      context: .
+      dockerfile: docker/oss_fuzz_env.Dockerfile
+      target: builder
+    container_name: oss-fuzz-builder
+    privileged: false
+    environment:
+      <<: *common-env
+      CONTAINER_ROLE: builder
+    volumes:
+      - ./oss-fuzz:/workspace/oss-fuzz
+      - ./config:/workspace/config:ro
+      - ./artifacts:/workspace/artifacts
+      - ./scripts:/workspace/scripts
+    command: >
+      bash -lc "tail -f /dev/null"
+    restart: unless-stopped
+
+  oss_fuzz_runner:
+    build:
+      context: .
+      dockerfile: docker/oss_fuzz_env.Dockerfile
+      target: runner
+    container_name: oss-fuzz-runner
+    depends_on:
+      - oss_fuzz_builder
+    environment:
+      <<: *common-env
+      CONTAINER_ROLE: runner
+    volumes:
+      - ./oss-fuzz:/workspace/oss-fuzz
+      - ./config:/workspace/config:ro
+      - ./artifacts:/workspace/artifacts
+      - ./scripts:/workspace/scripts
+    command: >
+      python3 /workspace/scripts/fuzz_orchestrator.py
+      --config /workspace/config/fuzz_targets.yaml
+      --artifacts /workspace/artifacts
+      --oss-fuzz /workspace/oss-fuzz
+    restart: unless-stopped

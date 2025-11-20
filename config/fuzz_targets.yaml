@@ -1,0 +1,24 @@
+targets:
+  - name: libpng_decoder
+    project: libpng
+    fuzz_target: libpng_read_fuzzer
+    enabled: true
+    sanitizer: address
+    binaries:
+      - path: /workspace/oss-fuzz/projects/libpng/libpng_read_fuzzer
+        args:
+          - "@corpus"
+        max_run_seconds: 600
+    dictionary: /workspace/oss-fuzz/projects/libpng/libpng.dict
+    environment:
+      UBSAN_OPTIONS: print_stacktrace=1
+
+  - name: sqlite_shell
+    project: sqlite3
+    fuzz_target: sqlite3_fuzz
+    enabled: false
+    sanitizer: undefined
+    binaries:
+      - path: /workspace/oss-fuzz/projects/sqlite3/sqlite3_fuzz
+        args: []
+        max_run_seconds: 900
