@@ -18,7 +18,6 @@ import shutil
 import subprocess
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Iterable, List
 
@@ -95,6 +94,7 @@ class DeployManager:
         self.skip_build = skip_build
         self.rollback_on_failure = rollback_on_failure
         self.force_reclone = force_reclone
+        self.compose_base_cmd: List[str] | None = None
 
     def deploy(self) -> None:
         logging.info("Starting OSS-Fuzz environment deployment...")
@@ -146,26 +146,7 @@ class DeployManager:
     def _ensure_prerequisites(self) -> None:
         logging.info("Verifying prerequisites...")
 
-        def verify(name: str, cmd: List[str]) -> tuple[str, bool]:
-            return name, _command_exists(cmd)
-
-        checks = {
-            "git": ["git", "--version"],
-            "docker": ["docker", "--version"],
-            "docker compose": ["docker", "compose", "version"],
-        }
-
-        missing: List[str] = []
-        with ThreadPoolExecutor(max_workers=len(checks)) as executor:
-            futures = [executor.submit(verify, name, cmd) for name, cmd in checks.items()]
-            for future in as_completed(futures):
-                name, ok = future.result()
-                if ok:
-                    logging.debug("Found prerequisite: %s", name)
-                else:
-                    logging.warning("Missing prerequisite: %s", name)
-                    missing.append(name)
-
+        missing = self._collect_missing_prereqs(log=True)
         if missing:
             if not self.auto_install:
                 raise DeployError(
@@ -173,6 +154,9 @@ class DeployManager:
                     "Re-run with --auto-install to install via apt."
                 )
             self._install_prerequisites(missing)
+            missing = self._collect_missing_prereqs(log=False)
+            if missing:
+                raise DeployError(f"Unable to satisfy prerequisites: {missing}")
 
         self._verify_docker_daemon()
 
@@ -180,19 +164,43 @@ class DeployManager:
         if shutil.which("apt-get") is None:
             raise DeployError("Auto-install requested but apt-get is unavailable.")
 
+        missing_list = list(dict.fromkeys(missing))
         package_map = {
-            "git": "git",
-            "docker": "docker.io",
-            "docker compose": "docker-compose-plugin",
+            "git": ["git"],
+            "docker": ["docker.io"],
+            "docker compose": ["docker-compose-plugin", "docker-compose"],
         }
-        apt_packages = sorted({package_map[name] for name in missing if name in package_map})
-        if not apt_packages:
+        install_plan = [name for name in missing_list if name in package_map]
+        if not install_plan:
             return
-        logging.info("Installing packages via apt: %s", ", ".join(apt_packages))
+
+        logging.info("Installing packages via apt: %s", ", ".join(install_plan))
         run_command(["sudo", "apt-get", "update"])
-        run_command(
-            ["sudo", "apt-get", "install", "-y", "--no-install-recommends", *apt_packages]
-        )
+
+        for name in install_plan:
+            candidates = package_map[name]
+            installed = False
+            for idx, package in enumerate(candidates):
+                logging.info("Installing %s using package '%s'...", name, package)
+                try:
+                    run_command(
+                        ["sudo", "apt-get", "install", "-y", "--no-install-recommends", package]
+                    )
+                    installed = True
+                    break
+                except DeployError as exc:
+                    error_text = str(exc)
+                    has_fallback = idx < len(candidates) - 1
+                    if "Unable to locate package" in error_text and has_fallback:
+                        logging.warning(
+                            "Package '%s' unavailable; trying fallback '%s'.",
+                            package,
+                            candidates[idx + 1],
+                        )
+                        continue
+                    raise
+            if not installed:
+                raise DeployError(f"Unable to install prerequisite: {name}")
 
     def _verify_docker_daemon(self) -> None:
         try:
@@ -251,7 +259,53 @@ class DeployManager:
     def _docker_compose_cmd(self, *args: str) -> None:
         if not COMPOSE_FILE.exists():
             raise DeployError(f"docker compose file is missing at {COMPOSE_FILE}")
-        run_command(["docker", "compose", "-f", str(COMPOSE_FILE), *args])
+        if self.compose_base_cmd is None and not self._detect_compose_command():
+            raise DeployError(
+                "Docker Compose command is unavailable. "
+                "Re-run prerequisite checks or install docker-compose."
+            )
+        run_command([*self.compose_base_cmd, "-f", str(COMPOSE_FILE), *args])
+
+    def _collect_missing_prereqs(self, *, log: bool) -> List[str]:
+        missing: List[str] = []
+        checks = {
+            "git": ["git", "--version"],
+            "docker": ["docker", "--version"],
+        }
+        for name, cmd in checks.items():
+            if _command_exists(cmd):
+                if log:
+                    logging.debug("Found prerequisite: %s", name)
+            else:
+                if log:
+                    logging.warning("Missing prerequisite: %s", name)
+                missing.append(name)
+
+        if self._detect_compose_command():
+            if log and self.compose_base_cmd:
+                logging.debug(
+                    "Found prerequisite: docker compose (%s)",
+                    " ".join(self.compose_base_cmd),
+                )
+        else:
+            if log:
+                logging.warning("Missing prerequisite: docker compose")
+            missing.append("docker compose")
+        return missing
+
+    def _detect_compose_command(self) -> bool:
+        candidates = [
+            (["docker", "compose"], ["docker", "compose", "version"], "Docker Compose plugin"),
+            (["docker-compose"], ["docker-compose", "--version"], "legacy docker-compose"),
+        ]
+        for base_cmd, check_cmd, label in candidates:
+            if _command_exists(check_cmd):
+                if self.compose_base_cmd != base_cmd:
+                    logging.debug("Using %s command: %s", label, " ".join(base_cmd))
+                self.compose_base_cmd = base_cmd
+                return True
+        self.compose_base_cmd = None
+        return False
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:

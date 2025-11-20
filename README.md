@@ -23,10 +23,11 @@ repository cloning, container builds, stack bring-up, and full rollback.
 
 ## Requirements
 
-- Linux host with sudo access.
-- Python 3.10+.
-- Docker Engine and Docker Compose plugin (`deploy.py --auto-install` can invoke
-  `apt-get` if they are missing).
+  - Linux host with sudo access.
+  - Python 3.10+.
+  - Docker Engine plus either the Docker Compose plugin (`docker compose`) or the
+    legacy `docker-compose` CLI. `deploy.py --auto-install` installs whichever apt
+    package your distro provides.
 
 ## Quick Start
 
@@ -271,5 +272,5 @@ by editing the YAML file and re-running the deploy workflow.
 - **Port exhaustion / resource pressure** – Lower `--max-parallel`, cap CPU usage via Compose (`cpus: 4`), or run on a larger host.
 - **Permission denied on repo cloning** – Check workspace ownership; the deploy script expects write access to `/workspace`.
 - **Network flakes while cloning** – Re-run with `--force-reclone` to delete partial checkouts.
-- **Docker Compose command not found** – Install the plugin via `sudo apt-get install docker-compose-plugin` or use a recent Docker release that bundles it.
+- **Docker Compose command not found** – Run `python3 scripts/deploy.py deploy --auto-install` so the script can install the plugin when available or fall back to `sudo apt-get install docker-compose` on older distros.
 - **Crash artifacts piling up** – Periodically `rm -rf artifacts/*` or leverage `python3 scripts/deploy.py rollback` to start fresh.
