@@ -86,3 +86,63 @@ The orchestrator streams every build/run log line to both stdout and the
 corresponding artifact directory, making it simple to ship logs to an external
 stack or inspect them locally. Add more targets, sanitizers, or auxiliary tools
 by editing the YAML file and re-running the deploy workflow.
+
+## Example Use Cases
+
+1. **Baseline libpng fuzzing**  
+   `python3 scripts/deploy.py deploy && tail -f artifacts/libpng_decoder/run.log`
+
+2. **Switch sanitizer for a single target**  
+   Edit the target entry to `sanitizer: undefined`, then run  
+   `docker compose exec oss-fuzz-runner python3 /workspace/scripts/fuzz_orchestrator.py --config /workspace/config/fuzz_targets.yaml`
+
+3. **Rapid rebuild after patching OSS-Fuzz project files**  
+   Apply patches inside `oss-fuzz/projects/<project>` and run  
+   `docker compose run --rm oss-fuzz-builder bash -lc "./infra/helper.py build_fuzzers <project>"`
+
+4. **Parallel fuzzing blitz across CPU cores**  
+   `docker compose exec oss-fuzz-runner python3 /workspace/scripts/fuzz_orchestrator.py --max-parallel $(nproc --ignore=2)`
+
+5. **Target-specific dictionary tuning**  
+   Drop a dictionary under `config/dicts/target.dict`, reference it in the YAML, redeploy with  
+   `python3 scripts/deploy.py deploy --skip-build`
+
+6. **CI smoke test without long fuzz runs**  
+   Update `binaries[*].max_run_seconds` to a small value (e.g., 60) and run  
+   `python3 scripts/deploy.py deploy --skip-build`
+
+7. **Nightly cleanup and redeploy**  
+   `python3 scripts/deploy.py rollback && python3 scripts/deploy.py deploy`
+
+8. **Collecting crashing inputs for triage**  
+   After a run, inspect `artifacts/<target>/crashes/` and replay inside the runner with  
+   `docker compose exec oss-fuzz-runner bash -lc "python3 infra/helper.py reproduce <project> <fuzz_target> artifacts/<target>/crashes/id:000000"`
+
+9. **Expanding coverage to a new project**  
+   Add a new entry in `config/fuzz_targets.yaml`, then run  
+   `python3 scripts/deploy.py deploy --skip-build` to pick up the config.
+
+10. **Full environment health check**  
+    `python3 scripts/deploy.py status && docker compose ps && docker compose logs --tail=50`
+
+## Command Reference
+
+- `python3 scripts/deploy.py deploy [flags]` – full deployment pipeline.
+- `python3 scripts/deploy.py status` – prints cached state + `docker compose ps`.
+- `python3 scripts/deploy.py rollback` – tears down containers, repos, and artifacts.
+- `docker compose logs -f oss-fuzz-runner` – follow orchestrator logs live.
+- `docker compose exec oss-fuzz-runner bash` – open an interactive shell for quick experiments.
+- `docker compose build --pull` – rebuild images with the latest upstream layers.
+
+## Possible Issues & Fixes
+
+- **Docker daemon unavailable** – Ensure the service is running (`sudo systemctl start docker`) or add your user to the `docker` group, then re-run deploy.
+- **`config/fuzz_targets.yaml` missing or malformed** – Copy the sample file or validate YAML syntax (`python3 -c "import yaml,sys; yaml.safe_load(open('config/fuzz_targets.yaml'))"`).
+- **Long image build times** – Use `python3 scripts/deploy.py deploy --skip-build` when only configuration changed, or enable Docker BuildKit caching (`DOCKER_BUILDKIT=1`).
+- **Helper script crashes on build** – Inspect `artifacts/<target>/build.log` for compiler errors; often missing dependencies inside `oss-fuzz` project files.
+- **Runner exits immediately** – Verify at least one target has `enabled: true`; otherwise the orchestrator raises `No enabled targets found`.
+- **Port exhaustion / resource pressure** – Lower `--max-parallel`, cap CPU usage via Compose (`cpus: 4`), or run on a larger host.
+- **Permission denied on repo cloning** – Check workspace ownership; the deploy script expects write access to `/workspace`.
+- **Network flakes while cloning** – Re-run with `--force-reclone` to delete partial checkouts.
+- **Docker Compose command not found** – Install the plugin via `sudo apt-get install docker-compose-plugin` or use a recent Docker release that bundles it.
+- **Crash artifacts piling up** – Periodically `rm -rf artifacts/*` or leverage `python3 scripts/deploy.py rollback` to start fresh.
