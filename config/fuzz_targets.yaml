@@ -71,3 +71,79 @@ targets:
       - path: /workspace/oss-fuzz/projects/sqlite3/sqlite3_fuzz
         args: []
         max_run_seconds: 900
+
+  - name: zlib_stream
+    project: zlib
+    fuzz_target: zlib_uncompress_fuzzer
+    enabled: true
+    sanitizer: address
+    max_run_seconds: 600
+    binaries:
+      - path: /workspace/oss-fuzz/projects/zlib/zlib_uncompress_fuzzer
+        args:
+          - "@corpus"
+        max_run_seconds: 600
+    environment:
+      ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1
+
+  - name: curl_url_parser
+    project: curl
+    fuzz_target: curl_url_parser_fuzzer
+    enabled: true
+    sanitizer: undefined
+    max_run_seconds: 900
+    binaries:
+      - path: /workspace/oss-fuzz/projects/curl/curl_url_parser_fuzzer
+        args:
+          - --max-links=100
+        max_run_seconds: 900
+    dictionary: /workspace/oss-fuzz/projects/curl/url.dict
+    environment:
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+      CURL_MAX_TOTAL_CONNECTIONS: "10"
+
+  - name: nghttp2_hpack
+    project: nghttp2
+    fuzz_target: hpack_decode_fuzzer
+    enabled: true
+    sanitizer: memory
+    max_run_seconds: 1200
+    binaries:
+      - path: /workspace/oss-fuzz/projects/nghttp2/hpack_decode_fuzzer
+        args:
+          - --dynamic-table-size=65536
+        max_run_seconds: 1200
+    dictionary: /workspace/oss-fuzz/projects/nghttp2/hpack.dict
+    environment:
+      MSAN_OPTIONS: symbolize=0:exit_code=77
+
+  - name: harfbuzz_shaper
+    project: harfbuzz
+    fuzz_target: hb-shape-fuzzer
+    enabled: true
+    sanitizer: address
+    max_run_seconds: 900
+    binaries:
+      - path: /workspace/oss-fuzz/projects/harfbuzz/hb-shape-fuzzer
+        args:
+          - --max-glyphs=2048
+        max_run_seconds: 900
+    dictionary: /workspace/oss-fuzz/projects/harfbuzz/hb-shape.dict
+    environment:
+      HB_BUFFER_MAX_LEN: "4096"
+
+  - name: imagemagick_svg
+    project: imagemagick
+    fuzz_target: svg_fuzzer
+    enabled: true
+    sanitizer: address
+    max_run_seconds: 900
+    binaries:
+      - path: /workspace/oss-fuzz/projects/imagemagick/svg_fuzzer
+        args:
+          - --config=svg
+        max_run_seconds: 900
+    dictionary: /workspace/oss-fuzz/projects/imagemagick/svg.dict
+    environment:
+      ASAN_OPTIONS: abort_on_error=1
+      MAGICK_TMPDIR: /tmp/magick

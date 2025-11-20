@@ -85,6 +85,16 @@ bug classes and sanitizer configurations:
   enabled to flush UB in cryptographic state machines.
 - **`sqlite_shell`** – disabled by default, but demonstrates how to park targets
   in the config until you are ready to enable them.
+- **`zlib_stream`** – compression/decompression fuzzing with strict ASAN settings
+  to flag stack reuse bugs in the inflate logic.
+- **`curl_url_parser`** – exercises libcurl’s URL parser under `undefined`
+  sanitizer to surface protocol smuggling edge cases.
+- **`nghttp2_hpack`** – HPACK decoder harness running under MSAN to reveal
+  initialization mistakes inside HTTP/2 header compression.
+- **`harfbuzz_shaper`** – glyph shaping fuzzer that constrains buffer length and
+  favors coverage across complex scripts.
+- **`imagemagick_svg`** – SVG importer fuzzing with tuned ASAN options to catch
+  parser-side heap corruption in graphics pipelines.
 
 Enable or tweak any of these entries, then re-run deploy or call the
 orchestrator directly inside the runner container to pick up the changes.
