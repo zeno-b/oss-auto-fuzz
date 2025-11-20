@@ -4,6 +4,7 @@ targets:
     fuzz_target: libpng_read_fuzzer
     enabled: true
     sanitizer: address
+    max_run_seconds: 600
     binaries:
       - path: /workspace/oss-fuzz/projects/libpng/libpng_read_fuzzer
         args:
@@ -13,11 +14,59 @@ targets:
     environment:
       UBSAN_OPTIONS: print_stacktrace=1
 
+  - name: libxslt_xpath
+    project: libxslt
+    fuzz_target: libxslt_xpath_fuzzer
+    enabled: true
+    sanitizer: address
+    max_run_seconds: 900
+    binaries:
+      - path: /workspace/oss-fuzz/projects/libxslt/libxslt_xpath_fuzzer
+        args:
+          - --max-parse-depth=10
+        max_run_seconds: 900
+    dictionary: /workspace/oss-fuzz/projects/libxslt/xpath.dict
+    environment:
+      ASAN_OPTIONS: fast_unwind_on_malloc=0:detect_leaks=1
+
+  - name: ffmpeg_mov_demuxer
+    project: ffmpeg
+    fuzz_target: ffmpeg_mov_demuxer_fuzzer
+    enabled: true
+    sanitizer: memory
+    max_run_seconds: 1200
+    binaries:
+      - path: /workspace/oss-fuzz/projects/ffmpeg/ffmpeg_mov_demuxer_fuzzer
+        args:
+          - --target=mov
+          - --max-cycles=2000000
+        max_run_seconds: 1200
+    dictionary: /workspace/oss-fuzz/projects/ffmpeg/ffmpeg.dict
+    environment:
+      MSAN_OPTIONS: symbolize=0:exit_code=77
+      FFMPEG_BUFFER_SIZE: "67108864"
+
+  - name: wolfssl_dtls
+    project: wolfssl
+    fuzz_target: dtls_client_fuzzer
+    enabled: true
+    sanitizer: undefined
+    max_run_seconds: 900
+    binaries:
+      - path: /workspace/oss-fuzz/projects/wolfssl/dtls_client_fuzzer
+        args:
+          - --cipher-suite=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        max_run_seconds: 900
+    environment:
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+      WOLFSSL_DEBUG: "1"
+
   - name: sqlite_shell
     project: sqlite3
     fuzz_target: sqlite3_fuzz
     enabled: false
     sanitizer: undefined
+    max_run_seconds: 900
     binaries:
       - path: /workspace/oss-fuzz/projects/sqlite3/sqlite3_fuzz
         args: []
